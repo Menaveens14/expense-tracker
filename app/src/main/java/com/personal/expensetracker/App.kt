@@ -35,6 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.AndroidViewModel
@@ -159,6 +160,7 @@ fun dayLabel(d: LocalDate) = when (d) {
                 val path = e.category + if (e.sub.isNotBlank()) " › ${e.sub}" else ""
                 val detail = listOf(path, e.dt.format(TFMT), e.tagList.joinToString(" ") { "#$it" }).filter { it.isNotBlank() }
                 Text(detail.joinToString(" · "), color = muted, fontSize = 13.sp)
+                if (e.note.isNotBlank()) Text(e.note, color = muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Text(money(e.amount), fontWeight = FontWeight.Medium)
         }
@@ -287,6 +289,7 @@ fun LazyListScope.rows(list: List<Expense>, onClick: (Expense) -> Unit, onDelete
     var date by remember(k) { mutableStateOf(ex?.dt?.toLocalDate() ?: LocalDate.now()) }
     var time by remember(k) { mutableStateOf((ex?.dt?.toLocalTime() ?: LocalTime.now()).withSecond(0).withNano(0)) }
     var tags by remember(k) { mutableStateOf(ex?.tagList?.toSet() ?: setOf()) }
+    var note by remember(k) { mutableStateOf(ex?.note ?: "") }
     var dlg by remember { mutableStateOf("") }
     val tax = taxonomy(all)
     val tagOptions = (allTags(all) + tags).distinct()
@@ -336,6 +339,11 @@ fun LazyListScope.rows(list: List<Expense>, onClick: (Expense) -> Unit, onDelete
                 tagOptions.forEach { t -> FilterChip(selected = t in tags, onClick = { tags = if (t in tags) tags - t else tags + t }, label = { Text("#$t") }) }
                 AssistChip(onClick = { dlg = "tag" }, label = { Text("+ Add tag") })
             }
+            Label("Description")
+            OutlinedTextField(
+                value = note, onValueChange = { note = it }, modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Optional note, e.g. what it was for") }, minLines = 2, maxLines = 4
+            )
             Spacer(Modifier.height(32.dp))
             Button(
                 enabled = valid, modifier = Modifier.fillMaxWidth().height(52.dp),
@@ -343,7 +351,7 @@ fun LazyListScope.rows(list: List<Expense>, onClick: (Expense) -> Unit, onDelete
                     vm.save(Expense(
                         id = ex?.id ?: UUID.randomUUID().toString(), amount = amount.toDouble(),
                         ts = LocalDateTime.of(date, time).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
-                        category = cat, sub = sub, tags = tags.joinToString(",")
+                        category = cat, sub = sub, tags = tags.joinToString(","), note = note.trim()
                     ))
                     nav.popBackStack()
                 }

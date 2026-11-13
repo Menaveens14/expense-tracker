@@ -27,7 +27,8 @@ data class Expense(
     val ts: Long,
     val category: String,
     val sub: String = "",
-    val tags: String = ""
+    val tags: String = "",
+    val note: String = ""
 ) {
     val dt: LocalDateTime get() = LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(ts), ZoneId.systemDefault())
     val tagList: List<String> get() = tags.split(',').map { it.trim() }.filter { it.isNotEmpty() }
@@ -42,13 +43,20 @@ interface ExpenseDao {
     @Delete suspend fun delete(e: Expense)
 }
 
-@Database(entities = [Expense::class], version = 1, exportSchema = false)
+val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE expenses ADD COLUMN note TEXT NOT NULL DEFAULT ''")
+    }
+}
+
+@Database(entities = [Expense::class], version = 2, exportSchema = false)
 abstract class Db : RoomDatabase() {
     abstract fun dao(): ExpenseDao
     companion object {
         @Volatile private var i: Db? = null
         fun get(c: Context): Db = i ?: synchronized(this) {
-            i ?: Room.databaseBuilder(c.applicationContext, Db::class.java, "expenses.db").build().also { i = it }
+            i ?: Room.databaseBuilder(c.applicationContext, Db::class.java, "expenses.db")
+                .addMigrations(MIGRATION_1_2).build().also { i = it }
         }
     }
 }
@@ -146,7 +154,7 @@ fun toDate(ms: Long): LocalDate = java.time.Instant.ofEpochMilli(ms).atZone(Zone
 
 // ---------- Minimal XLSX reader / writer ----------
 object Xlsx {
-    private val HEAD = listOf("ID", "Date", "Time", "Amount", "Category", "Subcategory", "Tags")
+    private val HEAD = listOf("ID", "Date", "Time", "Amount", "Category", "Subcategory", "Tags", "Description")
     private fun esc(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     private fun col(i: Int) = ('A' + i).toString()
 
@@ -167,7 +175,7 @@ object Xlsx {
                 sb.append("""<row r="$r">""")
                 s(0, r, e.id); s(1, r, d.toLocalDate().toString()); s(2, r, d.toLocalTime().format(DateTimeFormatter.ofPattern("HH:mm")))
                 sb.append("""<c r="D$r"><v>${e.amount}</v></c>""")
-                s(4, r, e.category); s(5, r, e.sub); s(6, r, e.tags)
+                s(4, r, e.category); s(5, r, e.sub); s(6, r, e.tags); s(7, r, e.note)
                 sb.append("</row>")
             }
             sb.append("</sheetData></worksheet>")
@@ -196,7 +204,7 @@ object Xlsx {
                     id = r[0]?.takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString(),
                     amount = r[3]!!.toDouble(),
                     ts = dt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
-                    category = r[4] ?: "", sub = r[5] ?: "", tags = r[6] ?: ""
+                    category = r[4] ?: "", sub = r[5] ?: "", tags = r[6] ?: "", note = r[7] ?: ""
                 )
             }.getOrNull()
         }
