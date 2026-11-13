@@ -1,0 +1,19 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.personal.expensetracker.app-mergeReleaseResources-58:/values-v23/values-v23.xml",
+            "map": [
+                {
+                    "source": "C:\\Users\\naveen.suresh\\.gradle\\caches\\8.9\\transforms\\76891b3046ff93e189984c56731ede3e\\transformed\\work-runtime-2.9.1\\res\\values-v23\\values-v23.xml",
+                    "from": {
+                        "startLines": "2,3",
+                        "startColumns": "4,4",
+                        "startOffsets": "55,121",
+                        "endColumns": "65,62",
+                        "endOffsets": "116,179"
+                    }
+                }
+            ]
+        }
+    ]
+}
