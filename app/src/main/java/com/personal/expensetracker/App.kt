@@ -511,8 +511,20 @@ fun LazyListScope.rows(list: List<Expense>, onClick: (Expense) -> Unit, onDelete
     val p = vm.prefs; val ctx = LocalContext.current; val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
     val signIn = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
-        runCatching { com.google.android.gms.auth.api.signin.GoogleSignIn.getSignedInAccountFromIntent(r.data).result.email }
-            .getOrNull()?.let { p.driveEmail = it } ?: vm.say("Google sign-in failed")
+        try {
+            val acct = com.google.android.gms.auth.api.signin.GoogleSignIn.getSignedInAccountFromIntent(r.data)
+                .getResult(com.google.android.gms.common.api.ApiException::class.java)
+            p.driveEmail = acct.email ?: ""
+            vm.say("Connected to Google Drive")
+        } catch (e: com.google.android.gms.common.api.ApiException) {
+            vm.say(when (e.statusCode) {
+                12501 -> "Sign-in cancelled"
+                10 -> "Error 10: this build's SHA-1 / package name doesn't match your Google Cloud Android client"
+                12500 -> "Error 12500: check the consent screen setup and that your account is a test user"
+                7, 12502 -> "Network problem (${e.statusCode}). Check your connection and try again"
+                else -> "Google sign-in failed (code ${e.statusCode})"
+            })
+        }
     }
     val last = p.lastSync.toLongOrNull() ?: 0L
     Sub(nav, vm, "Sync") {

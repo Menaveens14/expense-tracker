@@ -4,7 +4,9 @@ import android.accounts.Account
 import android.content.Context
 import android.util.Base64
 import androidx.work.*
+import com.google.android.gms.auth.GoogleAuthException
 import com.google.android.gms.auth.GoogleAuthUtil
+import com.google.android.gms.auth.UserRecoverableAuthException
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.Scope
@@ -63,20 +65,38 @@ object Cloud {
     }
 
     // ----- Google Drive -----
-    private fun driveHeaders(ctx: Context, p: Prefs): Map<String, String> {
-        val t = GoogleAuthUtil.getToken(ctx, Account(p.driveEmail, "com.google"), "oauth2:$DRIVE_SCOPE")
-        return mapOf("Authorization" to "Bearer $t")
+    private class AuthExpired : Exception("Drive token expired")
+
+    private fun driveHeaders(ctx: Context, p: Prefs, refresh: Boolean = false): Map<String, String> {
+        val acct = Account(p.driveEmail, "com.google"); val scope = "oauth2:$DRIVE_SCOPE"
+        try {
+            var t = GoogleAuthUtil.getToken(ctx, acct, scope)
+            if (refresh) { GoogleAuthUtil.clearToken(ctx, t); t = GoogleAuthUtil.getToken(ctx, acct, scope) }
+            return mapOf("Authorization" to "Bearer $t")
+        } catch (e: UserRecoverableAuthException) {
+            error("Google needs you to reconnect: Settings > Sync > Google Drive > Change")
+        } catch (e: GoogleAuthException) {
+            error("Google auth failed: ${e.message}")
+        }
+    }
+
+    // Runs op with a cached token; if Google says it expired (401), refreshes the token and retries once.
+    private fun <T> authed(ctx: Context, p: Prefs, op: (Map<String, String>) -> T): T =
+        try { op(driveHeaders(ctx, p)) } catch (e: AuthExpired) { op(driveHeaders(ctx, p, refresh = true)) }
+
+    private fun chk(r: R, ok: IntRange) {
+        if (r.code == 401) throw AuthExpired()
+        check(r.code in ok) { "Drive error ${r.code}" }
     }
 
     private fun driveFileId(h: Map<String, String>): String? {
         val q = URLEncoder.encode("name='$FILE_NAME' and trashed=false", "UTF-8")
         val r = http("GET", "https://www.googleapis.com/drive/v3/files?q=$q&fields=files(id)", h)
-        check(r.code == 200) { "Drive error ${r.code}" }
+        chk(r, 200..200)
         return JSONObject(r.text).getJSONArray("files").optJSONObject(0)?.getString("id")
     }
 
-    fun drive(ctx: Context, p: Prefs, data: ByteArray) {
-        val h = driveHeaders(ctx, p)
+    fun drive(ctx: Context, p: Prefs, data: ByteArray) = authed(ctx, p) { h ->
         val id = driveFileId(h)
         val r = if (id != null) {
             http("POST", "https://www.googleapis.com/upload/drive/v3/files/$id?uploadType=media",
@@ -88,15 +108,14 @@ object Cloud {
             http("POST", "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
                 h + ("Content-Type" to "multipart/related; boundary=$b"), o.toByteArray())
         }
-        check(r.code in 200..201) { "Drive error ${r.code}" }
+        chk(r, 200..201)
     }
 
-    fun drivePull(ctx: Context, p: Prefs): ByteArray {
-        val h = driveHeaders(ctx, p)
+    fun drivePull(ctx: Context, p: Prefs): ByteArray = authed(ctx, p) { h ->
         val id = driveFileId(h) ?: error("No $FILE_NAME found in Drive")
         val r = http("GET", "https://www.googleapis.com/drive/v3/files/$id?alt=media", h)
-        check(r.code == 200) { "Drive error ${r.code}" }
-        return r.body
+        chk(r, 200..200)
+        r.body
     }
 }
 
@@ -147,5 +166,5 @@ object SyncEngine {
 class SyncWorker(c: Context, p: WorkerParameters) : CoroutineWorker(c, p) {
     override suspend fun doWork(): Result = try {
         SyncEngine.syncNow(applicationContext); Result.success()
-    } catch (e: Exception) { Result.retry() }
+    } catch (e: Exception) { if (runAttemptCount >= 3) Result.failure() else Result.retry() }
 }
